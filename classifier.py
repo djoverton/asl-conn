@@ -44,6 +44,7 @@ OUTPUT_PLOT_NAME = "auc_weighted_classes_asl_female.png"
 #If using a different dataset (e.g., BOLD instead of ASL), change these
 X_ARRAY_NAME = "dat/tmp_input/X_array_asl_female"
 Y_ARRAY_NAME = "dat/tmp_input/y_array_asl_female"
+SUBJID_ARRAY_NAME = "dat/tmp_input/subjids_asl_female"
 
 #If loading new correlation matrices for the first time, specify "firstload" on the command line
 #Future runs with the same matrices (e.g., to tweak learning parameters) will not regenerate X and y arrays (much faster)
@@ -56,6 +57,7 @@ if len(sys.argv) > 1 and str(sys.argv[1]) == "firstload":
     diag_dict = {}
     X = []
     y = []
+    subjids = []
 
     for subj in diags.iterrows():
         if subj[1]["spectrum"] in [0, 1]:
@@ -67,18 +69,23 @@ if len(sys.argv) > 1 and str(sys.argv[1]) == "firstload":
             #Important that these arrays are in corresponding order
             X.append(connmat[np.tril_indices(len(connmat), k=-1)])
             y.append(diag_dict[int(subj_id.strip())])
+            subjids.append(subj_id)
 
     #Convert to numpy arrays
     nX = np.array(X)
     ny = np.array(y)
+    nsubjids = np.array(subjids)
 
     #Save X and y to disk
     X_fp = open(X_ARRAY_NAME, "w")
     y_fp = open(Y_ARRAY_NAME, "w")
+    sid_fp = open(SUBJID_ARRAY_NAME, "w")
     pickle.dump(nX, X_fp)
     pickle.dump(ny, y_fp)
+    pickle.dump(nsubjids, sid_fp)
     X_fp.close()
     y_fp.close()
+    sid_fp.close()
     print "Saved input files."
 
 #If "firstload" not specified, it's assumed that processed input files already exist
@@ -86,10 +93,13 @@ else:
     try:
         X_fp = open(X_ARRAY_NAME, "r")
         y_fp = open(Y_ARRAY_NAME, "r")
+        sid_fp = open(SUBJID_ARRAY_NAME, "r")
         nX = pickle.load(X_fp)
         ny = pickle.load(y_fp)
+        subjids = pickle.load(sid_fp)
         nX = np.array(nX)
         ny = np.array(ny)
+        nsubjids = np.array(subjids)
     except:
         print "Problem reading input files (did you run the script with the 'firstload' argument at least once?)"
 
@@ -118,6 +128,7 @@ else:
 indices = np.array([not np.any(np.isnan(vec)) for vec in nX])
 nX = nX[indices]
 ny = ny[indices]
+nsubjids = nsubjids[indices]
 
 #Begin k-fold cross validation
 kf = StratifiedKFold(n_splits=10)
@@ -145,6 +156,10 @@ lw = 2
 i = 0
 
 targets = ["HC", "PS"]
+results_subjids = []
+results_pred = []
+results_true = []
+results_correct = []
 
 #Begin cross-validation loop
 for train, test in kf.split(nX, ny):
@@ -183,8 +198,10 @@ for train, test in kf.split(nX, ny):
 
     pred = clf.predict(nX_sel[test])
     true = ny[test]
+    testsubjs = nsubjids[test]
     print pred
     print true
+    print testsubjs
     print classification_report(true, pred, target_names=targets)
     print f1_score(true, pred, average="macro")
     print clf.score(nX_sel[test], ny[test])
