@@ -14,6 +14,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.model_selection import StratifiedKFold
 from sklearn import svm
 from sklearn.svm import SVC
+from sklearn.svm import OneClassSVM
 from sklearn.metrics import roc_curve, auc
 from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import classification_report
@@ -39,7 +40,7 @@ from sklearn.tree import DecisionTreeClassifier
 INPUT_ASL_PATH = "dat/conn/corr_matrices_asl 2017-06-22 10:22:11.044669"
 INPUT_BOLD_PATH = "dat/conn/corr_matrices_bold 2017-06-23 11:55:06.365908"
 #INPUT_CLINICAL_PATH = "/external/PNC/data/clinical_data/psychosis_spectrum/pnc_clinical+spectrum+fs.csv"
-INPUT_CLINICAL_PATH = "dat/demog/pnc_phenotypes_v02_spectrum_fixed.csv"
+INPUT_CLINICAL_PATH = "dat/demog/PNC_phen_v02_psychosis.csv"
 INPUT_TD_PATH = "dat/demog/PNC_typically_developing-withmed.csv"
 OUTPUT_PLOT_NAME = "auc_weighted_classes_asl.png"
 
@@ -70,8 +71,8 @@ if len(sys.argv) > 1 and str(sys.argv[1]) == "firstload":
     subjids = []
 
     for subj in diags.iterrows():
-        if subj[1]["spectrum"] in [0, 1]:
-            diag_dict[subj[1]["SUBJID"]] = subj[1]["spectrum"]
+        if subj[1]["psychosis_spectrum"] in [0, 1]:
+            diag_dict[subj[1]["SUBJID"]] = subj[1]["psychosis_spectrum"]
 
     for subj_id in mat_asl.keys():
         if int(subj_id) in diag_dict.keys() and subj_id in mat_bold.keys():
@@ -125,10 +126,8 @@ else:
     except:
         print "Problem reading input files (did you run the script with the 'firstload' argument at least once?)"
 
-print nX_asl.shape
-print nX_bold.shape
-print ny.shape
-print nsubjids.shape
+print "Dimension check: BOLD = {}, ASL = {}, Labels = {}, Subject IDs = {}".format(nX_asl.shape, nX_bold.shape, ny.shape, nsubjids.shape)
+
 # Random labels for test purposes
 #ny = np.random.randint(2, size=len(ny))
 #ny = np.random.choice([0,0,0,0,0,0,0,1,1,1], size=len(ny), replace=True)
@@ -185,7 +184,7 @@ lw = 2
 i = 0
 
 targets = ["HC", "PS"]
-summary_fp = open("classify_summary.csv", "w")
+summary_fp = open("classify_summary2.csv", "w")
 summary_fp.write("subject,diagnosis,asl_pred,asl_correct,bold_pred,bold_correct\n")
 
 #Begin cross-validation loop
@@ -199,9 +198,13 @@ for train, test in kf.split(nX_asl, ny):
     nX_bold_sel = best_bold_xform.transform(nX_bold)
     #pca_xform = PCA(n_components=10000).fit(nX[train], ny[train])
     #nX_sel = pca_xform.transform(nX)
-    #ica_xform = decomposition.FastICA(n_components=1000, max_iter=200).fit(nX[train], ny[train])
-    #nX_sel = ica_xform.transform(nX)
     """
+    #ica_xform = decomposition.FastICA(n_components=1000, max_iter=5).fit(nX_asl[train], ny[train])
+    #nX_asl_sel = ica_xform.transform(nX_asl)
+    #ica_xform = decomposition.FastICA(n_components=1000, max_iter=5).fit(nX_bold[train], ny[train])
+    #nX_bold_sel = ica_xform.transform(nX_bold)
+
+    print "Starting new cross-validation fold"
     nX_asl_sel = nX_asl
     print nX_asl_sel.shape
     nX_bold_sel = nX_bold
@@ -210,9 +213,22 @@ for train, test in kf.split(nX_asl, ny):
     #Different model types. class_weight = "balanced" is very important!
 
     #clf = linear_model.LogisticRegression(class_weight="balanced",penalty="l2", C=1).fit(nX_sel[train], ny[train])
-    #clf = svm.SVC(kernel='sigmoid', probability=True, C=100, gamma=0.0001, class_weight="balanced").fit(nX_sel[train], ny[train])
-    clf_asl = svm.SVC(kernel='linear', probability=True, C=100, class_weight="balanced").fit(nX_asl_sel[train], ny[train])
-    clf_bold = svm.SVC(kernel='linear', probability=True, C=100, class_weight="balanced").fit(nX_bold_sel[train], ny[train])
+    #clf_asl = svm.SVC(kernel='linear', probability=True, C=100, gamma=0.0001, class_weight="balanced").fit(nX_asl_sel[train], ny[train])
+    #clf_bold = svm.SVC(kernel='linear', probability=True, C=100, gamma=0.0001, class_weight="balanced").fit(nX_bold_sel[train], ny[train])
+    indices_psych = [i for i, e in enumerate(ny[train]) if e == 1]
+
+    clf_asl = svm.SVC(kernel='linear', probability=True, C=10, class_weight="balanced").fit(nX_asl_sel[train], ny[train])
+    print "ASL model trained"
+    clf_bold = svm.SVC(kernel='linear', probability=True, C=10, class_weight="balanced").fit(nX_bold_sel[train], ny[train])
+    print "BOLD model trained"
+
+    #indices_psych = [i for i, e in enumerate(ny[train]) if e == 1]
+    #print nX_asl_sel.shape
+    #print nX_asl_sel[indices_psych].shape
+    #clf_asl = svm.OneClassSVM(nu=0.1, kernel="rbf", gamma=0.1).fit(nX_asl_sel[indices_psych])
+    #print "ASL model trained"
+    #clf_bold = svm.OneClassSVM(nu=0.1, kernel="rbf", gamma=0.1).fit(nX_bold_sel[indices_psych])
+    #print "BOLD model trained"
     #clf = RFE(estimator=clf2, n_features_to_select=10000, step=1000).fit(nX_sel[train], ny[train])
     #clf = DecisionTreeClassifier().fit(nX[train], ny[train])
     #clf = MLPClassifier(alpha=1, max_iter=1000).fit(nX_sel[train], ny[train])
@@ -239,18 +255,24 @@ for train, test in kf.split(nX_asl, ny):
     for ind in range(len(pred_asl)):
         #summary_fp.write(testsubjs[ind]+","+true[ind]+","+pred_asl[ind]+","+true[ind]==pred_asl[ind]+","+pred_bold[ind]+","+true[ind]==pred_bold[ind]+"\n")
         summary_fp.write("{},{},{},{},{},{}\n".format(testsubjs[ind], true[ind], pred_asl[ind], true[ind]==pred_asl[ind], pred_bold[ind], true[ind]==pred_bold[ind]))
+        print "ID: {}, Diagnosis: {}, ASL prediction: {}, BOLD prediction: {}".format(testsubjs[ind], true[ind], pred_asl[ind], pred_bold[ind])
 
-    print pred_asl
-    print pred_bold
-    print true
-    print testsubjs
-    """
-    print classification_report(true, pred, target_names=targets)
-    print f1_score(true, pred, average="macro")
-    print clf.score(nX_sel[test], ny[test])
+    print "ASL summary:"
+    print classification_report(true, pred_asl, target_names=targets)
+    print f1_score(true, pred_asl, average="macro")
+    print clf_asl.score(nX_asl_sel[test], ny[test])
+
     print "Confusion matrix:"
-    print confusion_matrix(true, pred)
-    print "Feature weights:"
+    print confusion_matrix(true, pred_asl)
+
+    print "BOLD summary:"
+    print classification_report(true, pred_bold, target_names=targets)
+    print f1_score(true, pred_bold, average="macro")
+    print clf_bold.score(nX_bold_sel[test], ny[test])
+
+    print "Confusion matrix:"
+    print confusion_matrix(true, pred_bold)
+    #print "Feature weights:"
     #print np.amax(clf.coef_)
     """
 
@@ -272,4 +294,4 @@ plt.ylabel('True Positive Rate')
 plt.title('PS (+) versus non-PS (-) SVM classification using BOLD connectivity')
 plt.legend(loc="lower right")
 plt.savefig("dat/plot/" + OUTPUT_PLOT_NAME)
-plt.show()
+plt.show() """
